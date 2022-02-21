@@ -1,4 +1,4 @@
-import { BigInt } from "@graphprotocol/graph-ts"
+import { Address, BigInt, Bytes } from "@graphprotocol/graph-ts"
 import {
   PhoenixDAO,
   Approval,
@@ -6,66 +6,131 @@ import {
   OwnershipTransferred,
   Transfer
 } from "../generated/PhoenixDAO/PhoenixDAO"
-import { ExampleEntity } from "../generated/schema"
+import { TokenDetail, TransactionHistory, User } from "../generated/schema"
 
 export function handleApproval(event: Approval): void {
-  // Entities can be loaded from the store using a string ID; this ID
-  // needs to be unique across all entities of the same type
-  let entity = ExampleEntity.load(event.transaction.from.toHex())
+  let transaction = new TransactionHistory(event.transaction.hash.toHex());
+  transaction.to = event.params._owner;
+  transaction.from = event.params._spender;
+  transaction.method = "approve";
+  transaction.amount = event.params._amount;
+  transaction.save()
 
-  // Entities only exist after they have been saved to the store;
-  // `null` checks allow to create entities on demand
-  if (!entity) {
-    entity = new ExampleEntity(event.transaction.from.toHex())
-
-    // Entity fields can be set using simple assignments
-    entity.count = BigInt.fromI32(0)
+  let id = event.params._spender.toHexString();
+  let user = User.load(id);
+  if(!user){
+    user = new User(id);
+    user.address = event.params._spender;
+    user.currentBalance = BigInt.fromI32(0);
   }
+  user.allowance = event.params._amount;
+  user.save()
 
-  // BigInt and BigDecimal math are supported
-  entity.count = entity.count + BigInt.fromI32(1)
-
-  // Entity fields can be set based on event parameters
-  entity._owner = event.params._owner
-  entity._spender = event.params._spender
-
-  // Entities can be written to the store with `.save()`
-  entity.save()
-
-  // Note: If a handler doesn't require existing field values, it is faster
-  // _not_ to load the entity from the store. Instead, create it fresh with
-  // `new Entity(...)`, set the fields that should be updated and save the
-  // entity back to the store. Fields that were not set or unset remain
-  // unchanged, allowing for partial updates to be applied.
-
-  // It is also possible to access smart contracts from mappings. For
-  // example, the contract that has emitted the event can be connected to
-  // with:
-  //
-  // let contract = Contract.bind(event.address)
-  //
-  // The following functions can then be called on this contract to access
-  // state variables and other data:
-  //
-  // - contract.allowance(...)
-  // - contract.allowed(...)
-  // - contract.approve(...)
-  // - contract.approveAndCall(...)
-  // - contract.balanceOf(...)
-  // - contract.balances(...)
-  // - contract.decimals(...)
-  // - contract.initialOwner(...)
-  // - contract.name(...)
-  // - contract.owner(...)
-  // - contract.phoenixAuthAddress(...)
-  // - contract.symbol(...)
-  // - contract.totalSupply(...)
-  // - contract.transfer(...)
-  // - contract.transferFrom(...)
 }
 
-export function handleBurn(event: Burn): void {}
+export function handleBurn(event: Burn): void {
+  let transaction = new TransactionHistory(event.transaction.hash.toHex());
+  transaction.to = Address.fromString("0x0000000000000000000000000000000000000000");
+  transaction.from = event.params._burner;
+  transaction.amount = event.params._amount;
+  transaction.method = "burn";
+  transaction.time = event.block.timestamp;
+  transaction.block = event.block.number;
+  transaction.save()
 
-export function handleOwnershipTransferred(event: OwnershipTransferred): void {}
+  
+  let id = event.params._burner.toHexString();
+  let user = User.load(id);
+  if(!user){
+    user = new User(id);
+  }
+  user.address = event.params._burner;
+  user.currentBalance = user.currentBalance.minus(event.params._amount);
+  user.allowance = user.allowance;
+  user.save();
 
-export function handleTransfer(event: Transfer): void {}
+}
+
+export function handleOwnershipTransferred(event: OwnershipTransferred): void {
+  let transaction = new TransactionHistory(event.transaction.hash.toHex());
+  transaction.to = event.params.newOwner;
+  transaction.from = event.params.previousOwner;
+  transaction.amount = BigInt.fromI32(0);
+  transaction.method = "ownershipTransfer";
+  transaction.time = event.block.timestamp;
+  transaction.block = event.block.number;
+  transaction.save()
+}
+
+export function handleTransfer(event: Transfer): void {
+  let transaction = new TransactionHistory(event.transaction.hash.toHex());
+  transaction.to = event.params._to;
+  transaction.from = event.params._from;
+  transaction.method = "transferToken";
+  transaction.amount = event.params._amount;
+  transaction.time = event.block.timestamp;
+  transaction.block = event.block.number;
+  transaction.save();
+  let tokenDetails = TokenDetail.load(Address.fromString("0x38A2fDc11f526Ddd5a607C1F251C065f40fBF2f7").toHexString());
+if(!tokenDetails){
+  tokenDetails = new TokenDetail(Address.fromString("0x38A2fDc11f526Ddd5a607C1F251C065f40fBF2f7").toHexString())
+  tokenDetails.tokenMaxSupply = BigInt.fromI32(110000000);
+  tokenDetails.holders = [];
+}
+let holders = tokenDetails.holders;
+ let senderUser = User.load((event.params._from).toHexString());
+ if(senderUser){
+    senderUser.currentBalance = senderUser.currentBalance.minus(event.params._amount)
+    if(holders.includes(senderUser.address.toHexString())){
+      if(senderUser.currentBalance.minus(event.params._amount) === BigInt.fromI64(0)){
+        const index = holders.indexOf(senderUser.address.toHexString());
+              if(index > -1){
+                holders.splice(index,1)
+                tokenDetails.holders = holders;
+              }
+      }
+    }else{
+      if(senderUser.currentBalance.minus(event.params._amount) !== BigInt.fromI64(0)){
+     holders.push(event.params._from.toHexString());
+     tokenDetails.holders = holders;
+      }
+    }
+
+    senderUser.save();
+ }
+ else{
+  senderUser = new User(event.params._from.toHexString());
+  senderUser.address = event.params._from;
+  senderUser.currentBalance = senderUser.currentBalance;
+  senderUser.allowance = event.params._amount;
+  senderUser.save()
+ }
+
+  let receiverUser = User.load((event.params._to).toHexString());
+  if(receiverUser){
+    receiverUser.currentBalance = receiverUser.currentBalance.plus(event.params._amount)
+    if(holders.includes(receiverUser.address.toHexString())){
+      if(receiverUser.currentBalance.minus(event.params._amount) == BigInt.fromI64(0)){
+        const index = holders.indexOf(receiverUser.address.toHexString());
+              if(index > -1){
+                holders.splice(index,1)
+                tokenDetails.holders = holders;
+              }
+      }
+    }else{
+      if(receiverUser.currentBalance.minus(event.params._amount) != BigInt.fromI64(0)){
+     holders.push(event.params._to.toHexString());
+     tokenDetails.holders = holders;
+      }
+    }
+    receiverUser.save();
+ }
+ else{
+   receiverUser = new User(event.params._to.toHexString());
+   receiverUser.address = event.params._to;
+   receiverUser.currentBalance = receiverUser.currentBalance.plus(event.params._amount);
+   receiverUser.allowance = event.params._amount;
+   receiverUser.save()
+ }
+ tokenDetails.save()
+}
