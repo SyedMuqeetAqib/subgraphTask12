@@ -1,6 +1,32 @@
-type ExampleEntity @entity {
-  id: ID!
-  count: BigInt!
-  _owner: Bytes! # address
-  _spender: Bytes! # address
+
+#current balance of each user
+#the allowance amount a user has given to another user
+# the transfer history
+# the overall total supply
+#holders count of the token.
+
+
+
+type User @entity {
+id: ID! #userId
+address: Bytes! # sender address
+currentBalance: BigInt! #current Balance of each user
+allowance: BigInt! #the allowance amount a user has given to another user
+}
+
+
+type TokenDetail @entity {
+id: ID! #tokenId
+tokenMaxSupply: BigInt! #total Supply
+holders: [User!]!
+}
+
+type TransactionHistory @entity {
+id: ID! #transactionId
+to: Bytes!
+from: Bytes!
+time: BigInt!
+amount: BigInt!
+block: BigInt!
+method: String!
 }
